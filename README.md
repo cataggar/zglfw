@@ -2,6 +2,10 @@
 
 Zig build package and bindings for [GLFW 3.4](https://github.com/glfw/glfw/releases/tag/3.4)
 
+Requires Zig 0.17.0 or newer. C layout checks use the pinned `translate_c`
+package to translate the bundled GLFW header with `GLFW_INCLUDE_NONE`;
+OpenGL headers are not needed for these checks.
+
 ## Getting started
 
 Example `build.zig`:
@@ -13,7 +17,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("zglfw", zglfw.module("root"));
 
     if (target.result.os.tag != .emscripten) {
-        exe.linkLibrary(zglfw.artifact("glfw"));
+        exe.root_module.linkLibrary(zglfw.artifact("glfw"));
     }
 }
 ```

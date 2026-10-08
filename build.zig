@@ -1,4 +1,5 @@
 const std = @import("std");
+const Translator = @import("translate_c").Translator;
 
 pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
@@ -28,8 +29,8 @@ pub fn build(b: *std.Build) void {
     };
 
     const options_step = b.addOptions();
-    inline for (std.meta.fields(@TypeOf(options))) |field| {
-        options_step.addOption(field.type, field.name, @field(options, field.name));
+    inline for (@typeInfo(@TypeOf(options)).@"struct".field_names) |name| {
+        options_step.addOption(@FieldType(@TypeOf(options), name), name, @field(options, name));
     }
 
     const options_module = options_step.createModule();
@@ -40,6 +41,16 @@ pub fn build(b: *std.Build) void {
             .{ .name = "zglfw_options", .module = options_module },
         },
     });
+
+    const translate_c = b.dependency("translate_c", .{});
+    const glfw_c: Translator = .init(translate_c, .{
+        .c_source_file = b.path("libs/glfw/include/GLFW/glfw3.h"),
+        .target = target,
+        .optimize = optimize,
+        .extra_args = &.{"-DGLFW_INCLUDE_NONE"},
+    });
+    addIncludePaths(b, &glfw_c, target, options);
+    module.addImport("glfw_c", glfw_c.mod);
 
     if (target.result.os.tag == .emscripten) return;
 
@@ -195,6 +206,7 @@ pub fn build(b: *std.Build) void {
     addIncludePaths(b, tests.root_module, target, options);
     linkSystemLibs(b, tests, target, options);
     tests.root_module.addImport("zglfw_options", options_module);
+    tests.root_module.addImport("glfw_c", glfw_c.mod);
     tests.root_module.linkLibrary(glfw);
     b.installArtifact(tests);
     test_step.dependOn(&b.addRunArtifact(tests).step);
