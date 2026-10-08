@@ -3,9 +3,22 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const options = @import("zglfw_options");
+const c = @import("glfw_c");
 
 test {
-    _ = std.testing.refAllDeclsRecursive(@This());
+    refAllDeclsRecursive(@This());
+}
+
+fn refAllDeclsRecursive(comptime T: type) void {
+    inline for (comptime std.meta.declarations(T)) |name| {
+        if (@TypeOf(@field(T, name)) == type) {
+            switch (@typeInfo(@field(T, name))) {
+                .@"struct", .@"enum", .@"union", .@"opaque" => refAllDeclsRecursive(@field(T, name)),
+                else => {},
+            }
+        }
+        _ = &@field(T, name);
+    }
 }
 
 const zglfw = @This();
@@ -14,7 +27,7 @@ fn cIntCast(value: anytype) c_int {
     const ValueType = @TypeOf(value);
     return switch (@typeInfo(ValueType)) {
         .int => @intCast(value),
-        .@"enum", .enum_literal => @intFromEnum(value),
+        .@"enum", .enum_literal => @backingInt(value),
         .bool => @intFromBool(value),
         else => @compileError("Cannot cast " ++ @typeName(ValueType) ++ "to int."),
     };
@@ -26,8 +39,8 @@ fn cIntCast(value: anytype) c_int {
 //
 //--------------------------------------------------------------------------------------------------
 pub const Bool = enum(c_int) { _ };
-pub const TRUE: Bool = @enumFromInt(1);
-pub const FALSE: Bool = @enumFromInt(0);
+pub const TRUE: Bool = @fromBackingInt(@intCast(1));
+pub const FALSE: Bool = @fromBackingInt(@intCast(0));
 
 pub const InitHint = enum(c_int) {
     joystick_hat_buttons = 0x00050001,
@@ -522,7 +535,7 @@ pub fn joystickIsGamepad(joystick: Joystick) bool {
 extern fn glfwJoystickIsGamepad(Joystick) Bool;
 
 pub fn joystickAsGamepad(joystick: Joystick) ?Gamepad {
-    return if (joystickIsGamepad(joystick)) @enumFromInt(@intFromEnum(joystick)) else null;
+    return if (joystickIsGamepad(joystick)) @fromBackingInt(@intCast(@backingInt(joystick))) else null;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -541,7 +554,7 @@ pub const Gamepad = enum(c_int) {
         left_trigger = 4,
         right_trigger = 5,
 
-        pub const count = std.meta.fields(@This()).len;
+        pub const count = @typeInfo(@This()).@"enum".field_names.len;
     };
 
     pub const Button = enum(u8) {
@@ -561,7 +574,7 @@ pub const Gamepad = enum(c_int) {
         dpad_down = 13,
         dpad_left = 14,
 
-        pub const count = std.meta.fields(@This()).len;
+        pub const count = @typeInfo(@This()).@"enum".field_names.len;
 
         pub const cross = Button.a;
         pub const circle = Button.b;
@@ -571,14 +584,13 @@ pub const Gamepad = enum(c_int) {
 
     pub const State = extern struct {
         comptime {
-            const c = @cImport(@cInclude("GLFW/glfw3.h"));
             assert(@sizeOf(c.GLFWgamepadstate) == @sizeOf(State));
-            for (std.meta.fieldNames(State)) |field_name| {
-                assert(@offsetOf(c.GLFWgamepadstate, field_name) == @offsetOf(State, field_name));
+            for (@typeInfo(State).@"struct".field_names) |name| {
+                assert(@offsetOf(c.GLFWgamepadstate, name) == @offsetOf(State, name));
             }
         }
-        buttons: [Button.count]Joystick.ButtonAction = .{Joystick.ButtonAction.release} ** Button.count,
-        axes: [Axis.count]f32 = .{@as(f32, 0)} ** Axis.count,
+        buttons: [Button.count]Joystick.ButtonAction = @splat(.release),
+        axes: [Axis.count]f32 = @splat(0),
     };
 
     pub const getName = getGamepadName;
@@ -702,11 +714,10 @@ extern fn glfwGetVideoModes(*Monitor, count: *c_int) ?[*]VideoMode;
 
 pub const VideoMode = extern struct {
     comptime {
-        const c = @cImport(@cInclude("GLFW/glfw3.h"));
         assert(@sizeOf(c.GLFWvidmode) == @sizeOf(VideoMode));
-        for (std.meta.fieldNames(VideoMode), 0..) |field_name, i| {
-            assert(@offsetOf(c.GLFWvidmode, std.meta.fieldNames(c.GLFWvidmode)[i]) ==
-                @offsetOf(VideoMode, field_name));
+        for (@typeInfo(VideoMode).@"struct".field_names, @typeInfo(c.GLFWvidmode).@"struct".field_names) |name, c_name| {
+            assert(@offsetOf(c.GLFWvidmode, c_name) ==
+                @offsetOf(VideoMode, name));
         }
     }
     width: c_int,
@@ -723,10 +734,9 @@ pub const VideoMode = extern struct {
 //--------------------------------------------------------------------------------------------------
 pub const Image = extern struct {
     comptime {
-        const c = @cImport(@cInclude("GLFW/glfw3.h"));
         assert(@sizeOf(c.GLFWimage) == @sizeOf(Image));
-        for (std.meta.fieldNames(Image)) |field_name| {
-            assert(@offsetOf(c.GLFWimage, field_name) == @offsetOf(Image, field_name));
+        for (@typeInfo(Image).@"struct".field_names) |name| {
+            assert(@offsetOf(c.GLFWimage, name) == @offsetOf(Image, name));
         }
     }
     width: c_int,
@@ -894,7 +904,7 @@ pub fn getWindowAttribute(
     comptime attrib: Window.Attribute,
 ) Window.Attribute.ValueType(attrib) {
     return switch (@typeInfo(Window.Attribute.ValueType(attrib))) {
-        .bool => @as(Bool, @enumFromInt(getWindowAttributeUntyped(window, attrib))) == TRUE,
+        .bool => @as(Bool, @fromBackingInt(@intCast(getWindowAttributeUntyped(window, attrib)))) == TRUE,
         .int => getWindowAttributeUntyped(window, attrib),
         else => unreachable,
     };
@@ -1132,7 +1142,7 @@ pub fn getInputMode(
     window: *Window,
     comptime mode: InputMode,
 ) Error!InputMode.ValueType(mode) {
-    return @enumFromInt(try getInputModeUntyped(window, mode));
+    return @fromBackingInt(@intCast(try getInputModeUntyped(window, mode)));
 }
 pub fn getInputModeUntyped(window: *Window, mode: InputMode) Error!c_int {
     const value = glfwGetInputMode(window, mode);
